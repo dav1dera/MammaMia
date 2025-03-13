@@ -16,6 +16,7 @@ from Src.API.animeworld import animeworld
 from Src.Utilities.dictionaries import okru,STREAM,extra_sources,webru_vary,webru_dlhd,provider_map,skystreaming
 from Src.API.epg import tivu, tivu_get,epg_guide,convert_bho_1,convert_bho_2,convert_bho_3
 from Src.API.webru import webru,get_skystreaming
+from Src.API.onlineserietv import onlineserietv
 from curl_cffi.requests import AsyncSession
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -51,6 +52,7 @@ CB = config.CB
 DDL = config.DDL
 GS = config.GS
 GHD = config.GHD
+OST = config.OST
 HOST = config.HOST
 PORT = int(config.PORT)
 Icon = config.Icon
@@ -107,7 +109,7 @@ async def transform_mfp(mfp_stream_url,client):
         data = response.json()
         url = data['mediaflow_proxy_url'] + "?api_password=" + data['query_params']['api_password'] + "&d=" + urllib.parse.quote(data['destination_url'])
         for i in data['request_headers']:
-            url += f"&h_{i}=({urllib.parse.quote(data['request_headers'][i])})"
+            url += f"&h_{i}={urllib.parse.quote(data['request_headers'][i])}"
 
 
         return url
@@ -266,11 +268,12 @@ async def addon_stream(request: Request,config, type, id,):
                     if id in webru_vary:
                         i = i+1
                         webru_url, Referer_webru_url,Origin_webru_url = await webru(id,"vary",client)
-                        if MFP== "1":
+                        if MFP== "1" and webru_url:
                             webru_url = f'{MFP_url}/proxy/hls/manifest.m3u8?api_password={MFP_password}&d={webru_url}&h_Referer={Referer_webru_url}&h_Origin={Origin_webru_url}&h_User-Agent=Mozilla%2F5.0%20(Windows%20NT%2010.0%3B%20Win64%3B%20x64)%20AppleWebKit%2F537.36%20(KHTML%2C%20like%20Gecko)%20Chrome%2F58.0.3029.110%20Safari%2F537.3'
                             streams['streams'].append({'title': f"{Icon}Proxied Server X-{i} " + channel['title'],'url': webru_url})
                         else:
-                            streams['streams'].append({'title': f'{Icon}Server X-{i}' + channel['title'], 'url': webru_url, "behaviorHints": {"notWebReady": True, "proxyHeaders": {"request": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.5", "Origin": Origin_webru_url, "DNT": "1", "Sec-GPC": "1", "Connection": "keep-alive", "Referer": Referer_webru_url, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "cross-site", "Pragma": "no-cache", "Cache-Control": "no-cache", "TE": "trailers"}}}})
+                            if webru_url:
+                                streams['streams'].append({'title': f'{Icon}Server X-{i}' + channel['title'], 'url': webru_url, "behaviorHints": {"notWebReady": True, "proxyHeaders": {"request": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3", "Accept": "*/*", "Accept-Language": "en-US,en;q=0.5", "Origin": Origin_webru_url, "DNT": "1", "Sec-GPC": "1", "Connection": "keep-alive", "Referer": Referer_webru_url, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "cross-site", "Pragma": "no-cache", "Cache-Control": "no-cache", "TE": "trailers"}}}})
 
                     if id in webru_dlhd:
                         if DLHD == "1":
@@ -394,6 +397,11 @@ async def addon_stream(request: Request,config, type, id,):
                 if url_guardahd:
                     print(f"GuardaHD Found Results for {id}")
                     streams['streams'].append({'name': f"{Name}",'title': f'{Icon}GuardaHD', 'url': url_guardahd, 'behaviorHints': {'bingeGroup': 'guardahd'}})
+            if provider_maps['ONLINESERIETV'] == "1" and OST == "1":
+                url_onlineserietv,name = await onlineserietv(id,client)
+                if url_onlineserietv:
+                    print(f"OnlineSerieTV Found Results for {id}")
+                    streams['streams'].append({'name': f"{Name}",'title': f'{Icon}OnlineSerieTV\n{name}', 'url': url_onlineserietv, 'behaviorHints': {'proxyHeaders': {'request': {"User-Agent": 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36', "Referer": "https://flexy.stream/"}}, 'bingeGroup': 'onlineserietv', 'notWebReady': True}})
         if not streams['streams']:
             raise HTTPException(status_code=404)
 

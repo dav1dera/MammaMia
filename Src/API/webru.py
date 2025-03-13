@@ -62,7 +62,13 @@ async def get_stream_link(id,site,client):
             href = soup.find('a').get('href')
             response = await client.get(href)
             soup = BeautifulSoup(response.text, 'lxml', parse_only=SoupStrainer('button'))
-            webru_iframe = soup.find('button', {"data-type": "embed"}).get('data-url')
+            webru_iframe = soup.find_all('button', {"data-type": "embed"})
+            for i in webru_iframe:
+                webru_iframe = i.get('data-url')
+                if "php" not in webru_iframe:
+                    continue
+                else:
+                    break
             webru_iframe = "https://" + webru_iframe.split("/")[2]
             vary_id = webru_vary[id]
             vary_link = f"{webru_iframe}/server_lookup.php?channel_id={vary_id}"
@@ -108,7 +114,9 @@ async def get_skystreaming_url(skystreaming_link,client):
         if "hls" in skystreaming_link:
             m3u8_url = skystreaming_link
             Host = m3u8_url.replace("https://","").split("/")[0]
-            return m3u8_url,Host
+            response =  await client.get(skystreaming_link, headers=headers, allow_redirects=True, impersonate = "chrome120")
+            Origin = response.url.split('/embed')[0]
+            return m3u8_url,Host,Origin 
         response =  await client.get(skystreaming_link, headers=headers, allow_redirects=True, impersonate = "chrome120")
         Origin = response.url.split('/embed')[0]
         soup = BeautifulSoup(response.text, 'lxml', parse_only=SoupStrainer('source'))
