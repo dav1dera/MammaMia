@@ -10,7 +10,7 @@
 # if detect(some_string):
 #     unpacked = unpack(some_string)
 #
-
+from fake_headers import Headers  
 """Unpacker for Dean Edward's p.a.c.k.e.r"""
 import re
 from bs4 import BeautifulSoup, SoupStrainer
@@ -133,20 +133,22 @@ class UnpackingError(Exception):
 
     pass
 
+random_headers = Headers()
 
 
 async def eval_solver(stream_link,proxies, ForwardProxy, client):
     try:
-        headers = {}
+        headers = random_headers.generate()
         headers["user-agent"] = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36"
         headers["User-Agent"] = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.71 Mobile Safari/537.36"
         response = await client.get( ForwardProxy + stream_link,  allow_redirects=True, timeout=30, headers = headers, proxies = proxies, impersonate = "chrome124")
+        print("Eval:",response.status_code)
         soup = BeautifulSoup(response.text, "lxml",parse_only=SoupStrainer("script"))
         script_all = soup.find_all("script")
         for i in script_all:
             if detect(i.text):
                 unpacked_code = unpack(i.text)
-                match = re.search(r'sources:\s*\[\{\s*src:\s*"([^"]+)"', unpacked_code)
+                match = re.search( r'file:"(.*?)"', unpacked_code)
                 if match:
                     m3u8_url = match.group(1)
                     return m3u8_url

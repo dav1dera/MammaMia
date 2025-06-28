@@ -1,4 +1,4 @@
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup,SoupStrainer
 from Src.Utilities.convert import get_TMDb_id_from_IMDb_id
 from Src.Utilities.info import get_info_tmdb, is_movie, get_info_imdb
 import Src.Utilities.config as config
@@ -91,7 +91,6 @@ async def search(query,date,ismovie, client,SC_FAST_SEARCH,movie_id):
     response = await client.get(ForwardProxy + query, headers = random_headers, allow_redirects=True, impersonate = "chrome124", proxies = proxies)
     print(response)
     response = response.json()
-
     for item in response['data']:
         tid = item['id']
         slug = item['slug']
@@ -106,7 +105,7 @@ async def search(query,date,ismovie, client,SC_FAST_SEARCH,movie_id):
                 random_headers = headers.generate()
                 random_headers['Referer'] = f"{SC_DOMAIN}/"
                 random_headers['Origin'] = f"{SC_DOMAIN}"
-                response = await client.get ( ForwardProxy + f'{SC_DOMAIN}/titles/{tid}-{slug}', headers = random_headers, allow_redirects=True,impersonate = "chrome124", proxies = proxies)
+                response = await client.get ( ForwardProxy + f'{SC_DOMAIN}/it/titles/{tid}-{slug}', headers = random_headers, allow_redirects=True,impersonate = "chrome124", proxies = proxies)
                 soup = BeautifulSoup(response.text, "lxml")
                 data = json.loads(soup.find("div", {"id": "app"}).get("data-page"))
                 version = data['version']
@@ -115,6 +114,7 @@ async def search(query,date,ismovie, client,SC_FAST_SEARCH,movie_id):
                     print(movie_id)
                     #Here we need to convert because the IMDB ID is often bugged
                 tmdb_id = str(data['props']['title']['tmdb_id'])
+                print(tmdb_id)
                 if tmdb_id == movie_id:
                     return tid,slug,version
             elif SC_FAST_SEARCH == "1":
@@ -136,10 +136,10 @@ async def get_film(tid,version,client,MFP):
     random_headers['User-Agent'] = User_Agent
     random_headers['user-agent'] = User_Agent
     #Access the iframe
-    url = f'{SC_DOMAIN}/iframe/{tid}'
+    url = f'{SC_DOMAIN}/it/iframe/{tid}'
     if MFP == "1":
-        url = f'{SC_DOMAIN}/iframe/{tid}'
-        quality = "Unknown"
+        url = f'{SC_DOMAIN}/it/iframe/{tid}'
+        quality = "Unknown" 
         return url,quality
     response = await client.get(ForwardProxy + url, headers=random_headers, allow_redirects=True,impersonate = "chrome124", proxies = proxies)
     iframe = BeautifulSoup(response.text, 'lxml')
@@ -198,15 +198,44 @@ async def get_season_episode_id(tid,slug,season,episode,version,client):
     random_headers['Origin'] = f"{SC_DOMAIN}"
     random_headers['x-inertia'] = "true"
     random_headers['x-inertia-version'] = version
+    random_headers['accept'] = 'text/html, application/xhtml+xml'
+    random_headers['accept-language'] = 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7' 
     
     #Set some basic headers for the request  
       #Get episode ID 
-    response = await client.get(ForwardProxy + f'{SC_DOMAIN}/titles/{tid}-{slug}/stagione-{season}', headers=random_headers, allow_redirects=True, impersonate = "chrome124", proxies = proxies)
+    response = await client.get(ForwardProxy + f'{SC_DOMAIN}/it/titles/{tid}-{slug}/season-{season}', headers=random_headers, allow_redirects=True, impersonate = "chrome124", proxies = proxies)
     # Print the json got
     json_response = response.json().get('props', {}).get('loadedSeason', {}).get('episodes', [])
     for dict_episode in json_response:
         if dict_episode['number'] == episode:
             return dict_episode['id']
+
+
+
+async def extractor(link,client):
+    random_headers = headers.generate()
+    random_headers['Referer'] = f"{SC_DOMAIN}/"
+    random_headers['Origin'] = f"{SC_DOMAIN}"
+    random_headers['User-Agent'] = User_Agent
+    random_headers['user-agent'] = User_Agent
+    response = await client.get(link)        
+    if response.status_code != 200:
+        print("Failed to extract URL components, Invalid Request")
+    soup = BeautifulSoup(response.text, "lxml", parse_only=SoupStrainer("body"))
+    if soup:
+        script = soup.find("body").find("script").text
+        token = re.search(r"'token':\s*'(\w+)'", script).group(1)
+        expires = re.search(r"'expires':\s*'(\d+)'", script).group(1)
+        server_url = re.search(r"url:\s*'([^']+)'", script).group(1)
+        quality = re.search(r'"quality":(\d+)', script).group(1)
+        if "?b=1" in server_url:
+            final_url = f'{server_url}&token={token}&expires={expires}'
+        else:
+            final_url = f"{server_url}?token={token}&expires={expires}"
+        if "window.canPlayFHD = true" in script:
+            final_url += "&h=1"
+    return final_url,quality
+
 
 async def get_episode_link(episode_id,tid,version,client,MFP):
     ''''
@@ -225,10 +254,10 @@ async def get_episode_link(episode_id,tid,version,client,MFP):
     #Let's try to get the link from iframe source
         # Make a request to get iframe source
     if MFP == "1":
-        url = f'{SC_DOMAIN}/iframe/{tid}?episode_id={episode_id}&next_episode=1'
+        url = f'{SC_DOMAIN}/it/iframe/{tid}?episode_id={episode_id}&next_episode=1'
         quality = "Unknown"
         return url,quality
-    response = await client.get(ForwardProxy + f"{SC_DOMAIN}/iframe/{tid}", params=params, headers = random_headers, allow_redirects=True, impersonate = "chrome124", proxies = proxies)
+    response = await client.get(ForwardProxy + f"{SC_DOMAIN}/it/iframe/{tid}", params=params, headers = random_headers, allow_redirects=True, impersonate = "chrome124", proxies = proxies)
 
     # Parse response with BeautifulSoup to get iframe source
     soup = BeautifulSoup(response.text, "lxml")
@@ -274,9 +303,123 @@ async def get_episode_link(episode_id,tid,version,client,MFP):
     return url,quality
 
 
+async def streamingcommunity_site(imdb,client,SC_FAST_SEARCH,MFP):
+    general = await is_movie(imdb)
+    ismovie = general[0]
+    imdb_id = general[1]
+    if ismovie == 0 : 
+        season = int(general[2])
+        episode = int(general[3])
+    #Check if fast search is enabled or disabled
+        if SC_FAST_SEARCH == "1":
+            type = "StreamingCommunityFS"
+            if "tt" in imdb:
+                    #Get showname
+                showname = await get_info_imdb(imdb_id,ismovie,type,client)
+                date = None
+            else:
+                #I just set n season to None to avoid bugs, but it is not needed if Fast search is enabled
+                date = None
+                #else just equals them
+                tmdba = imdb_id.replace("tmdb:","")
+                showname = get_info_tmdb(tmdba,ismovie,type)
+        elif SC_FAST_SEARCH == "0":
+            type = "StreamingCommunity"
+            if "tt" in imdb:
+                tmdba = await get_TMDb_id_from_IMDb_id(imdb_id,client)
+            showname,date = get_info_tmdb(tmdba,ismovie,type) 
+        #HERE THE CASE IF IT IS A MOVIE
+    else:
+        if SC_FAST_SEARCH == "1":
+            type = "StreamingCommunityFS"
+            if "tt" in imdb:
+                #Get showname
+                date = None
+                showname = await get_info_imdb(imdb_id,ismovie,type,client)
+            else:
+                    date = None
+                    tmdba = imdb_id.replace("tmdb:","")
+                    showname = get_info_tmdb(tmdba,ismovie,type) 
+        elif SC_FAST_SEARCH == "0":
+            type = "StreamingCommunity"
+            if "tt" in imdb:
+                #Get showname
+                showname,date = await get_info_imdb(imdb_id,ismovie,type,client)
+            else:
+                tmdba = imdb_id.replace("tmdb:","")
+                showname,date = get_info_tmdb(tmdba,ismovie,type)     
+    showname = showname.replace(" ", "+").replace("–", "+").replace("—","+")
+    showname = urllib.parse.quote_plus(showname)
+    query = f'{SC_DOMAIN}/api/search?q={showname}'
+    tid,slug,version = await search(query,date,ismovie,client,SC_FAST_SEARCH,imdb_id)
+    if ismovie == 1:
+    #TID means temporaly ID
+        url,quality = await get_film(tid,version,client,MFP)
+        print("MammaMia found results for StreamingCommunity")
+        return url,quality,slug
+    if ismovie == 0:
+        #Uid = URL ID
+        episode_id = await get_season_episode_id(tid,slug,season,episode,version,client)
+        url,quality = await get_episode_link(episode_id,tid,version,client,MFP)
+        return url,quality,slug
+
+async def vixsrc(imdb,client,SC_FAST_SEARCH,MFP):
+    general = await is_movie(imdb)
+    ismovie = general[0]
+    id = general[1]
+    if "tt" in imdb:
+        tmdb = await get_TMDb_id_from_IMDb_id(id,client)
+    else:
+        tmdb = id
+    if ismovie == 0 : 
+        season = int(general[2])
+        episode = int(general[3])
+        site_url = f'{SC_DOMAIN}/tv/{tmdb}/{general[2]}/{general[3]}/'
+    else:
+        site_url = f'{SC_DOMAIN}/movie/{tmdb}/' 
+    if MFP == "1":
+        quality = "Unknown"
+        return site_url,quality,""
+    else:
+        full_url,quality = await extractor(site_url,client)
+        return full_url,quality,""
+
+
 async def streaming_community(imdb,client,SC_FAST_SEARCH,MFP):
     try:
-        '''
+        if "vixsrc" in SC_DOMAIN:
+            url,quality,slug = await vixsrc(imdb,client,SC_FAST_SEARCH,MFP)
+        elif "streaming" in SC_DOMAIN:
+            url,quality,slug = await streamingcommunity_site(imdb,client,SC_FAST_SEARCH,MFP)
+        return url,quality,slug
+    except Exception as e:
+        print("StreamingCommunity failed",e)
+        return None,None,None
+        
+'''
+            
+'''
+async def test_animeworld():
+    from curl_cffi.requests import AsyncSession
+    async with AsyncSession() as client:
+        # Replace with actual id, for example 'anime_id:episode' format
+        test_id = "tt6468322:1:1"  # This is an example ID format
+        results = await streaming_community(test_id, client,"0","0")
+        print(results)
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_animeworld())
+
+
+
+
+
+
+
+
+
+'''
         if Public_Instance == "1":
             Weird_Link = json.loads(Alternative_Link)
             link_post = random.choice(Weird_Link)
@@ -286,79 +429,4 @@ async def streaming_community(imdb,client,SC_FAST_SEARCH,MFP):
             quality_sc = response.headers.get('x-quality-sc')
             print(quality_sc,url_streaming_community)
             return url_streaming_community,url_720_streaming_community,quality_sc
-        '''
-        general = await is_movie(imdb)
-        ismovie = general[0]
-        imdb_id = general[1]
-
-        if ismovie == 0 : 
-            season = int(general[2])
-            episode = int(general[3])
-            #Check if fast search is enabled or disabled
-            if SC_FAST_SEARCH == "1":
-                type = "StreamingCommunityFS"
-                if "tt" in imdb:
-                #Get showname
-                    showname = await get_info_imdb(imdb_id,ismovie,type,client)
-                    date = None
-                else:
-                    #I just set n season to None to avoid bugs, but it is not needed if Fast search is enabled
-                    date = None
-                    #else just equals them
-                    tmdba = imdb_id.replace("tmdb:","")
-                    showname = get_info_tmdb(tmdba,ismovie,type)
-            elif SC_FAST_SEARCH == "0":
-                type = "StreamingCommunity"
-                if "tt" in imdb:
-                    tmdba = await get_TMDb_id_from_IMDb_id(imdb_id,client)
-                showname,date = get_info_tmdb(tmdba,ismovie,type) 
-        #HERE THE CASE IF IT IS A MOVIE
-        else:
-            if SC_FAST_SEARCH == "1":
-                type = "StreamingCommunityFS"
-                if "tt" in imdb:
-                    #Get showname
-                    date = None
-                    showname = await get_info_imdb(imdb_id,ismovie,type,client)
-                else:
-                        date = None
-                        tmdba = imdb_id.replace("tmdb:","")
-                        showname = get_info_tmdb(tmdba,ismovie,type) 
-            elif SC_FAST_SEARCH == "0":
-                type = "StreamingCommunity"
-                if "tt" in imdb:
-                    #Get showname
-                    showname,date = await get_info_imdb(imdb_id,ismovie,type,client)
-                else:
-                        tmdba = imdb_id.replace("tmdb:","")
-                        showname,date = get_info_tmdb(tmdba,ismovie,type) 
-        
-        showname = showname.replace(" ", "+").replace("–", "+").replace("—","+")
-        showname = urllib.parse.quote_plus(showname)
-        query = f'{SC_DOMAIN}/api/search?q={showname}'
-        tid,slug,version = await search(query,date,ismovie,client,SC_FAST_SEARCH,imdb_id)
-        if ismovie == 1:
-            #TID means temporaly ID
-            url,quality = await get_film(tid,version,client,MFP)
-            print("MammaMia found results for StreamingCommunity")
-            return url,quality,slug
-        if ismovie == 0:
-            #Uid = URL ID
-            episode_id = await get_season_episode_id(tid,slug,season,episode,version,client)
-            url,quality = await get_episode_link(episode_id,tid,version,client,MFP)
-            return url,quality,slug
-    except Exception as e:
-        print("MammaMia: StreamingCommunity failed",e)
-        return None,None,None
-
-async def test_animeworld():
-    from curl_cffi.requests import AsyncSession
-    async with AsyncSession() as client:
-        # Replace with actual id, for example 'anime_id:episode' format
-        test_id = "tt4772188"  # This is an example ID format
-        results = await streaming_community(test_id, client,"0","0")
-        print(results)
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_animeworld())
+'''
